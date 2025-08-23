@@ -6,9 +6,11 @@ from sim.metrics import Metrics
 from sim.visualization import draw_parking_lot, SLOT_SIZE, MARGIN, ENTRY_ROAD_WIDTH
 import random
 
+
 ROWS, COLS = 5, 10
+INFO_HEIGHT = 60  # Height for the info section
 SCREEN_W = ENTRY_ROAD_WIDTH + COLS * (SLOT_SIZE + MARGIN)
-SCREEN_H = ROWS * (SLOT_SIZE + MARGIN)
+SCREEN_H = ROWS * (SLOT_SIZE + MARGIN) + INFO_HEIGHT
 FPS = 30
 
 class Game:
@@ -22,7 +24,11 @@ class Game:
         self.cars = []
         self.time = 0
         self.spawn_timer = 0
-        self.font = pygame.font.SysFont(None, 24)
+        # Use JetBrains Mono font, fallback to default if not found
+        try:
+            self.font = pygame.font.SysFont("JetBrains Mono", 24)
+        except:
+            self.font = pygame.font.SysFont(None, 24)
 
     def spawn_car(self):
         car = Car.random_car(self.time)
@@ -31,6 +37,15 @@ class Game:
             slot = random.choice(free_slots)
             self.lot.occupy(*slot)
             car.slot = slot
+            # Path: entry road -> row road -> slot
+            entry_x = ENTRY_ROAD_WIDTH // 2
+            row_y = slot[0] * (SLOT_SIZE + MARGIN) + SLOT_SIZE // 2
+            slot_x, slot_y = ENTRY_ROAD_WIDTH + slot[1] * (SLOT_SIZE + MARGIN) + SLOT_SIZE // 2, row_y
+            path = [
+                (entry_x, row_y),  # move vertically to row
+                (slot_x, slot_y)   # move horizontally to slot
+            ]
+            car.set_path([(entry_x, 0)] + path)
             self.metrics.record_park(car.wait_time)
             leave_time = self.time + car.parking_duration
             self.cars.append({'car': car, 'leave_time': leave_time})
@@ -44,6 +59,9 @@ class Game:
         if self.spawn_timer > random.expovariate(1/3):
             self.spawn_car()
             self.spawn_timer = 0
+        # Move cars along their paths
+        for c in self.cars:
+            c['car'].move_along_path()
         # Remove cars whose time is up
         for c in list(self.cars):
             if c['leave_time'] <= self.time:
@@ -54,7 +72,9 @@ class Game:
         occ = self.lot.occupancy_percent()
         txt = f"Occupancy: {occ:.0f}%  Parked: {self.metrics.parked}  Failed: {self.metrics.failed}  Avg wait: {self.metrics.avg_wait():.1f}  Reward: {self.metrics.rewards}"
         img = self.font.render(txt, True, (255,255,255))
-        self.screen.blit(img, (10, SCREEN_H-30))
+        # Draw a background rectangle for the info section at the bottom
+        pygame.draw.rect(self.screen, (20, 20, 20), (0, SCREEN_H-INFO_HEIGHT, SCREEN_W, INFO_HEIGHT))
+        self.screen.blit(img, (10, SCREEN_H-INFO_HEIGHT+16))
 
     def run(self):
         running = True
@@ -63,7 +83,9 @@ class Game:
                 if event.type == pygame.QUIT:
                     running = False
             self.update()
-            draw_parking_lot(self.screen, self.lot, [c['car'] for c in self.cars])
+            # Draw main game area (excluding info section)
+            game_surface = self.screen.subsurface((0, 0, SCREEN_W, SCREEN_H-INFO_HEIGHT))
+            draw_parking_lot(game_surface, self.lot, [c['car'] for c in self.cars])
             self.draw_metrics()
             pygame.display.flip()
             self.clock.tick(FPS)
